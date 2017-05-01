@@ -102,7 +102,8 @@ int readn(int sd, char* ip, char* buf, int n) {
 
   while (toberead > 0) {
     int byteread = read(sd, ptr, toberead);
-
+    printf("client sent: %s\n", ptr);
+    // fix this logic
     if (byteread < toberead) {
       if (!interactWithHost(sd, ip, buf)) {
         return 0;
@@ -158,6 +159,9 @@ void buildHostnameEndpointAndMessage(char* buf, char* hostName, char* endpoint, 
   char method[strlen(buf)];
   char protocol[strlen(buf)];
   sscanf(buf, "%s %s %s", method, hostName, protocol);
+  // printf("method: %s\n", method);
+  // printf("hostName: %s\n", hostName);
+  // printf("protocol: %s\n", protocol);
 
   // build endpoint
   int endpoint_index = getEndpointIndexFrom(buf);
@@ -165,12 +169,15 @@ void buildHostnameEndpointAndMessage(char* buf, char* hostName, char* endpoint, 
   for (int i = endpoint_index - strlen(method); i < strlen(hostName); ++i) {
     endpoint[++a] = hostName[i];
   }
+  endpoint[++a] = '\0';
   hostName[endpoint_index - strlen(method)] = '\0';
 
   // build message
   char line1[strlen(buf)];
   sprintf(line1, "%s %s %s", method, endpoint, protocol);
-  char* rest = &buf[strlen(method) + strlen(hostName) + strlen(protocol) + 4];
+  // printf("hostName: %s\n", protocol);
+  // printf("line1: %s\n", line1);
+  char* rest = &buf[strlen(line1) + strlen(hostName)];
   sprintf(message, "%s%s", line1, rest);
 }
 
@@ -192,12 +199,25 @@ int parsePortNoFromEndpoint(char* endpoint) {
   return port_no;
 }
 
+void getHostNameSansPort(char* dest, char* hostName) {
+  for (int i = 0; i < strlen(hostName); ++i) {
+    dest[i] = hostName[i];
+    if (hostName[i] == ':') {
+      dest[i] = '\0';
+      break;
+    }
+  }
+}
+
 int connectServerSocket(char* hostName, int port_no) {
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0) perror("ERROR opening socket");
 
+  char host_name_sans_port[strlen(hostName)];
+  getHostNameSansPort(host_name_sans_port, hostName);
+
   /* lookup the ip address */  
-  struct hostent* server = gethostbyname(hostName);
+  struct hostent* server = gethostbyname(host_name_sans_port);
   if (server == NULL) {
     perror("ERROR, no such host");
     return -1;
@@ -207,7 +227,7 @@ int connectServerSocket(char* hostName, int port_no) {
   struct sockaddr_in serv_addr;
   memset(&serv_addr,0,sizeof(serv_addr));
   serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons(80);
+  serv_addr.sin_port = htons(port_no);
   memcpy(&serv_addr.sin_addr.s_addr,server->h_addr,server->h_length);
 
   /* connect the socket */
@@ -265,11 +285,8 @@ int getServerResponse(int sockfd, char* response, int maxResponseSize) {
 }
 
 int sendResponse(int sd, char* msg) {
-  /* write len */ // this like only makes it break 
-  // because the client stops recognizing the header as the header
   long len = (msg ? strlen(msg) + 1 : 0);
   len = htonl(len);
-  //write(sd, (char *) &len, sizeof(len));
 
   /* write message text */
   len = ntohl(len);
@@ -308,7 +325,9 @@ int interactWithHost(int sd, char* ip, char* buf) {
   char endpoint[strlen(buf)];
   char message[strlen(buf)];
   buildHostnameEndpointAndMessage(buf, host_name, endpoint, message);
-  // printf("endpoint: %s\n", endpoint);
+  printf("message: %s\n", message);
+  printf("host_name: %s\n", host_name);
+  printf("endpoint: %s\n", endpoint);
   char url[strlen(host_name) + strlen(endpoint)];
   sprintf(url, "%s%s", host_name, endpoint);
 
@@ -316,7 +335,7 @@ int interactWithHost(int sd, char* ip, char* buf) {
   int max_response_size = 16384;
   char response[max_response_size];
   
-  struct timeval  tv1, tv2;
+  struct timeval tv1, tv2;
   gettimeofday(&tv1, NULL);
 
   int cache_index = cacheIndexOf(url);
@@ -335,7 +354,6 @@ int interactWithHost(int sd, char* ip, char* buf) {
     // printf("Server to Proxy (also Proxy to Client):\n----------------------\n%s\n", response);
     content_length = getServerResponse(sockfd, response, max_response_size);  
 
-    // so this isn't threadsafe and i think this will just point to garbage when the function returns
     insertIntoCache(url, response);
 
     /* close the socket */
@@ -349,6 +367,7 @@ int interactWithHost(int sd, char* ip, char* buf) {
   printf("%s|%s|%s|%d|%d\n", ip, url, (cache_index == -1) ? "CACHE_MISS" : "CACHE_HIT", content_length, msec);
 
   /* send response back to client */
+  printf("response:\n%s\n", response);
   sendResponse(sd, response);
 
   return 0;
