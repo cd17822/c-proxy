@@ -9,4 +9,4 @@ multi-threaded-server: multi-threaded-server.o confutils.o
 	gcc -std=c11 -g -o multi-threaded-server confutils.o multi-threaded-server.o -lpthread
 
 clean:
-	rm *.o
+	rm *.o multi-threaded-server
