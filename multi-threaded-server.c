@@ -14,6 +14,8 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#define MAX_MSG_LEN 65536
+
 extern int startserver();
 extern int readn(int sd, char* ip, char *buf, int n);
 extern int sendResponse(int sd, char *msg);
@@ -101,7 +103,7 @@ void* process(void* ptr) {
     // len = ntohl(len);
 
     /* allocate space for message text */
-    long len = 8192;
+    long len = MAX_MSG_LEN;
     msg = NULL;
     if (len > 0) {
       msg = (char *) malloc(len);

@@ -16,15 +16,17 @@
 #include <sys/time.h>
 #include <pthread.h>
 
-#define MAXNAMELEN 256
+#define MAX_MSG_LEN 65536
+#define MAX_NAME_LEN 256
 #define CACHE_SIZE 256
 /*--------------------------------------------------------------------*/
-int sendResponse(int sd, char* msg);
+int sendResponse(int sd, char* msg, int contentLength);
 int interactWithHost(int sd, char* ip, char* buf);
 pthread_mutex_t MUTEX = PTHREAD_MUTEX_INITIALIZER;
 int FIRST_FREE_CACHE_INDEX = 0;
 char CACHE_URLS[CACHE_SIZE][256];
-char CACHE[CACHE_SIZE][8192];
+char CACHE[CACHE_SIZE][MAX_MSG_LEN];
+int CACHE_LENGTHS[CACHE_SIZE];
 /*----------------------------------------------------------------*/
 /* prepare server to accept requests
    returns file descriptor of socket
@@ -33,7 +35,7 @@ char CACHE[CACHE_SIZE][8192];
 int startserver() {
   int sd; /* socket descriptor */
 
-  char* servhost = malloc(MAXNAMELEN);
+  char* servhost = malloc(MAX_NAME_LEN);
   ushort servport; /* port assigned to this server */
 
   /* create a TCP socket using socket() */
@@ -67,7 +69,7 @@ int startserver() {
    use gethostname() and gethostbyname()
    full host name is remote**.cs.binghamton.edu
    */
-  if (gethostname(servhost, MAXNAMELEN) < 0){
+  if (gethostname(servhost, MAX_NAME_LEN) < 0){
     perror("Error on gethostname: ");
     exit(1);
   }
@@ -95,33 +97,32 @@ int startserver() {
   return sd;
 }
 
-int readn(int sd, char* ip, char* buf, int n) {
-  int toberead = n;
-  char* ptr = buf;
-  int incrementation = 0; // not being used
+int readn(int sd, char* ip, char* buf, int maxResponseSize) {
+  int total = maxResponseSize;
+  int received = 0;
+  int received_this_time = 0;
 
-  while (toberead > 0) {
-    int byteread = read(sd, ptr, toberead);
-    printf("client sent: %s\n", ptr);
-    // fix this logic
-    if (byteread < toberead) {
-      if (!interactWithHost(sd, ip, buf)) {
-        return 0;
-      } else {
-        printf("ERROR QUERYING HOST\n");
-        return 1;
-      }
+  do {
+    received_this_time = read(sd, buf + received, total - received);
 
-      if (byteread == -1) {
-        perror("read");
-      }
-
-      return 0;
+    if (received_this_time < 0) {
+      perror("ERROR reading response from client");
     }
 
-    toberead -= byteread;
-    ptr += byteread;
-    incrementation += byteread; // not being used
+    received += received_this_time;
+    // printf("readn loop received: %d\n", received);
+  } while (0 && received_this_time != 0);
+
+  if (received == maxResponseSize) {
+    perror("ERROR storing complete response from client");
+    buf[maxResponseSize - 1] = '\0';    
+  }
+
+  if (!interactWithHost(sd, ip, buf)) {
+    return 0;
+  } else {
+    printf("ERROR QUERYING HOST\n");
+    return 1;
   }
 
   return 1;
@@ -178,7 +179,7 @@ void buildHostnameEndpointAndMessage(char* buf, char* hostName, char* endpoint, 
   // printf("hostName: %s\n", protocol);
   // printf("line1: %s\n", line1);
   char* rest = &buf[strlen(line1) + strlen(hostName)];
-  sprintf(message, "%s%s", line1, rest);
+  sprintf(message, "%s%s%s", line1, rest, "\0");
 }
 
 int parsePortNoFromEndpoint(char* endpoint) {
@@ -200,26 +201,31 @@ int parsePortNoFromEndpoint(char* endpoint) {
 }
 
 void getHostNameSansPort(char* dest, char* hostName) {
-  for (int i = 0; i < strlen(hostName); ++i) {
-    dest[i] = hostName[i];
+  int i;
+  for (i = 0; i < strlen(hostName); ++i) {
     if (hostName[i] == ':') {
-      dest[i] = '\0';
       break;
     }
+
+    dest[i] = hostName[i];
   }
+
+  dest[i] = '\0';
 }
 
 int connectServerSocket(char* hostName, int port_no) {
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0) perror("ERROR opening socket");
 
+  // printf("host_name: %s\n", hostName);
   char host_name_sans_port[strlen(hostName)];
   getHostNameSansPort(host_name_sans_port, hostName);
 
   /* lookup the ip address */  
   struct hostent* server = gethostbyname(host_name_sans_port);
   if (server == NULL) {
-    perror("ERROR, no such host");
+    // printf("host_name_sans_port: %s\n", host_name_sans_port);
+    perror("ERROR no such host");
     return -1;
   }
 
@@ -264,18 +270,18 @@ int getServerResponse(int sockfd, char* response, int maxResponseSize) {
   int total = maxResponseSize;
   int received = 0;
   int received_this_time = 0;
-  int chunk_size = 256;
 
   do {
     received_this_time = read(sockfd, response + received, total - received);
+    
     if (received_this_time < 0) {
       perror("ERROR reading response from socket");
-    } else if (received_this_time == 0) {
       break;
     }
 
     received += received_this_time;
-  } while (response[received-1] > 10);
+    // printf("gsr loop received: %d\n", received);
+  } while (received_this_time != 0);
 
   if (received == maxResponseSize) {
     perror("ERROR storing complete response from socket");
@@ -284,14 +290,10 @@ int getServerResponse(int sockfd, char* response, int maxResponseSize) {
   return received;
 }
 
-int sendResponse(int sd, char* msg) {
-  long len = (msg ? strlen(msg) + 1 : 0);
-  len = htonl(len);
-
+int sendResponse(int sd, char* msg, int contentLength) {
   /* write message text */
-  len = ntohl(len);
-  if (len > 0) {
-    write(sd, msg, strlen(msg));
+  if (contentLength > 0) {
+    write(sd, msg, contentLength); // DOES THIS HAVE TO LOOP
     return 0;
   }
 
@@ -307,11 +309,12 @@ int cacheIndexOf(char* url) {
   return -1;
 }
 
-void insertIntoCache(char* url, char* response) {
+void insertIntoCache(char* url, char* response, int contentLength) {
   pthread_mutex_lock(&MUTEX);
 
   strcpy(CACHE_URLS[FIRST_FREE_CACHE_INDEX], url);
   strcpy(CACHE[FIRST_FREE_CACHE_INDEX], response);
+  CACHE_LENGTHS[FIRST_FREE_CACHE_INDEX] = contentLength;
   FIRST_FREE_CACHE_INDEX = (FIRST_FREE_CACHE_INDEX + 1) % CACHE_SIZE;
 
   pthread_mutex_unlock(&MUTEX);
@@ -325,14 +328,14 @@ int interactWithHost(int sd, char* ip, char* buf) {
   char endpoint[strlen(buf)];
   char message[strlen(buf)];
   buildHostnameEndpointAndMessage(buf, host_name, endpoint, message);
-  printf("message: %s\n", message);
-  printf("host_name: %s\n", host_name);
-  printf("endpoint: %s\n", endpoint);
+  // printf("message:\n%s\n", message);
+  // printf("host_name: %s\n", host_name);
+  // printf("endpoint: %s\n", endpoint);
   char url[strlen(host_name) + strlen(endpoint)];
   sprintf(url, "%s%s", host_name, endpoint);
 
   int content_length;
-  int max_response_size = 16384;
+  int max_response_size = MAX_MSG_LEN;
   char response[max_response_size];
   
   struct timeval tv1, tv2;
@@ -341,7 +344,7 @@ int interactWithHost(int sd, char* ip, char* buf) {
   int cache_index = cacheIndexOf(url);
   if (cache_index != -1) {
     strcpy(response, CACHE[cache_index]);
-    content_length = strlen(response);
+    content_length = CACHE_LENGTHS[cache_index];
   } else {
     /* create the socket */
     int sockfd = connectServerSocket(host_name + strlen("http://"), parsePortNoFromEndpoint(endpoint));
@@ -354,7 +357,7 @@ int interactWithHost(int sd, char* ip, char* buf) {
     // printf("Server to Proxy (also Proxy to Client):\n----------------------\n%s\n", response);
     content_length = getServerResponse(sockfd, response, max_response_size);  
 
-    insertIntoCache(url, response);
+    insertIntoCache(url, response, content_length);
 
     /* close the socket */
     close(sockfd);
@@ -367,8 +370,8 @@ int interactWithHost(int sd, char* ip, char* buf) {
   printf("%s|%s|%s|%d|%d\n", ip, url, (cache_index == -1) ? "CACHE_MISS" : "CACHE_HIT", content_length, msec);
 
   /* send response back to client */
-  printf("response:\n%s\n", response);
-  sendResponse(sd, response);
+  // printf("response:\n%s\n", response);
+  sendResponse(sd, response, content_length);
 
   return 0;
 }
