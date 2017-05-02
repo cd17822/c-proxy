@@ -27,7 +27,7 @@ int sendResponse(int sd, char* msg, int contentLength);
 int interactWithHost(int sd, char* ip, char* buf);
 pthread_mutex_t MUTEX = PTHREAD_MUTEX_INITIALIZER;
 int FIRST_FREE_CACHE_INDEX = 0;
-char CACHE_URLS[CACHE_SIZE][256];
+char CACHE_URLS[CACHE_SIZE][MAX_NAME_LEN];
 char CACHE[CACHE_SIZE][MAX_MSG_LEN];
 int CACHE_LENGTHS[CACHE_SIZE];
 /*----------------------------------------------------------------*/
