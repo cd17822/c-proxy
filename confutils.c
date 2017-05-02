@@ -1,4 +1,6 @@
 /*--------------------------------------------------------------------*/
+#define _BSD_SOURCE
+
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
@@ -15,6 +17,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <pthread.h>
+
 
 #define MAX_MSG_LEN 65536
 #define MAX_NAME_LEN 256
@@ -36,7 +39,7 @@ int startserver() {
   int sd; /* socket descriptor */
 
   char* servhost = malloc(MAX_NAME_LEN);
-  ushort servport; /* port assigned to this server */
+  unsigned short servport; /* port assigned to this server */
 
   /* create a TCP socket using socket() */
   sd = socket(AF_INET, SOCK_STREAM, 0);

@@ -68,7 +68,7 @@ void* process(void* ptr) {
   int cli_sd;
 
   char * clienthost;
-  ushort clientport;
+  unsigned short clientport;
 
   if (getpeername(conn->sock, (struct sockaddr *)&conn->sin_cli, &conn->len) < 0) {
     perror("Get peername error: ");
